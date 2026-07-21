@@ -1,4 +1,3 @@
-import type { PhishingAnalysis, HistoryEntry } from "@/lib/phishing.functions";
 import type { HistoryEntry as HE } from "@/lib/history";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
