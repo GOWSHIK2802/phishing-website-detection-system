@@ -1,18 +1,20 @@
 import type { HistoryEntry as HE } from "@/lib/history";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Shield, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, AlertTriangle,
   CheckCircle2, Search, Sparkles, FileJson, FileText, FileDown, Star, StarOff,
   Trash2, Sun, Moon, History, BarChart3, Info, Globe, Lock, LockOpen, Radar,
-  ClipboardList, Brain, ArrowRight, ExternalLink,
+  ClipboardList, Brain, ArrowRight, ExternalLink, LogIn, LogOut, User as UserIcon,
 } from "lucide-react";
 
 import { analyzeUrl, type PhishingAnalysis as PA } from "@/lib/phishing.functions";
 import { addToHistory, clearHistory, deleteEntry, getHistory, toggleFavorite } from "@/lib/history";
 import { exportCSV, exportJSON, exportPDF } from "@/lib/report";
 import { applyTheme, getTheme, toggleTheme, type Theme } from "@/lib/theme";
+import { useAuth } from "@/hooks/use-auth";
+import { listScans, saveScan, deleteScan, setScanFavorite, clearScans } from "@/lib/scans.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -56,6 +58,13 @@ function verdictStyle(v: PA["verdict"]) {
 function Index() {
   const router = useRouter();
   const analyze = useServerFn(analyzeUrl);
+  const listScansFn = useServerFn(listScans);
+  const saveScanFn = useServerFn(saveScan);
+  const deleteScanFn = useServerFn(deleteScan);
+  const favoriteScanFn = useServerFn(setScanFavorite);
+  const clearScansFn = useServerFn(clearScans);
+  const { user, signOut } = useAuth();
+
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,11 +77,28 @@ function Index() {
     const t = getTheme();
     applyTheme(t);
     setTheme(t);
-    setHistory(getHistory());
-    const onChange = () => setHistory(getHistory());
-    window.addEventListener("phishguard:history-changed", onChange);
-    return () => window.removeEventListener("phishguard:history-changed", onChange);
   }, []);
+
+  // Load history: DB for signed-in users, localStorage otherwise
+  useEffect(() => {
+    let cancelled = false;
+    if (user) {
+      listScansFn().then((rows) => {
+        if (cancelled) return;
+        setHistory(rows.map((r) => ({
+          id: r.id, analyzedAt: r.analyzedAt, url: r.url, normalizedUrl: r.normalizedUrl,
+          verdict: r.verdict, score: r.score, confidence: r.confidence,
+          favorite: r.favorite, analysis: r.analysis,
+        })));
+      }).catch(() => setHistory([]));
+    } else {
+      setHistory(getHistory());
+      const onChange = () => setHistory(getHistory());
+      window.addEventListener("phishguard:history-changed", onChange);
+      return () => window.removeEventListener("phishguard:history-changed", onChange);
+    }
+    return () => { cancelled = true; };
+  }, [user, listScansFn]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -83,12 +109,56 @@ function Index() {
     try {
       const data = await analyze({ data: { url } });
       setResult(data);
-      addToHistory(data);
+      if (user) {
+        await saveScanFn({
+          data: {
+            url: data.url, normalizedUrl: data.normalizedUrl, verdict: data.verdict,
+            score: data.score, confidence: data.confidence, analysis: data,
+            analyzedAt: data.analyzedAt,
+          },
+        });
+        const rows = await listScansFn();
+        setHistory(rows.map((r) => ({
+          id: r.id, analyzedAt: r.analyzedAt, url: r.url, normalizedUrl: r.normalizedUrl,
+          verdict: r.verdict, score: r.score, confidence: r.confidence,
+          favorite: r.favorite, analysis: r.analysis,
+        })));
+      } else {
+        addToHistory(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
       router.invalidate();
+    }
+  }
+
+  async function onDelete(id: string) {
+    if (user) {
+      await deleteScanFn({ data: { id } });
+      setHistory((h) => h.filter((e) => e.id !== id));
+    } else {
+      deleteEntry(id);
+    }
+  }
+  async function onToggleFav(id: string) {
+    if (user) {
+      const cur = history.find((h) => h.id === id);
+      const next = !cur?.favorite;
+      await favoriteScanFn({ data: { id, favorite: next } });
+      setHistory((h) => h.map((e) => (e.id === id ? { ...e, favorite: next } : e)));
+    } else {
+      toggleFavorite(id);
+    }
+  }
+  async function onClearAll() {
+    if (!confirm("Clear all history?")) return;
+    if (user) {
+      await clearScansFn();
+      setHistory([]);
+    } else {
+      clearHistory();
     }
   }
 
@@ -106,7 +176,7 @@ function Index() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <nav className="flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs">
+            <nav className="hidden sm:flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs">
               <TabBtn active={tab === "scan"} onClick={() => setTab("scan")} icon={<Search className="h-3.5 w-3.5" />}>Scan</TabBtn>
               <TabBtn active={tab === "history"} onClick={() => setTab("history")} icon={<History className="h-3.5 w-3.5" />}>History</TabBtn>
               <TabBtn active={tab === "analytics"} onClick={() => setTab("analytics")} icon={<BarChart3 className="h-3.5 w-3.5" />}>Analytics</TabBtn>
@@ -119,8 +189,30 @@ function Index() {
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
+            {user ? (
+              <div className="flex items-center gap-1.5 rounded-full border border-border bg-card/60 pl-2.5 pr-1 py-1 text-xs">
+                <UserIcon className="h-3.5 w-3.5 text-primary" />
+                <span className="hidden sm:inline max-w-[140px] truncate text-foreground/85">{user.email}</span>
+                <button onClick={() => signOut()} title="Sign out"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-destructive">
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Link to="/auth" className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:brightness-110">
+                <LogIn className="h-3.5 w-3.5" /> Sign in
+              </Link>
+            )}
           </div>
         </header>
+
+        <nav className="mx-auto flex max-w-6xl sm:hidden px-6 pb-2">
+          <div className="flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs w-full">
+            <TabBtn active={tab === "scan"} onClick={() => setTab("scan")} icon={<Search className="h-3.5 w-3.5" />}>Scan</TabBtn>
+            <TabBtn active={tab === "history"} onClick={() => setTab("history")} icon={<History className="h-3.5 w-3.5" />}>History</TabBtn>
+            <TabBtn active={tab === "analytics"} onClick={() => setTab("analytics")} icon={<BarChart3 className="h-3.5 w-3.5" />}>Analytics</TabBtn>
+          </div>
+        </nav>
 
         <main className="mx-auto max-w-5xl px-6 pb-24 pt-4">
           {tab === "scan" && (
@@ -128,7 +220,16 @@ function Index() {
               url={url} setUrl={setUrl} loading={loading} error={error} result={result} onSubmit={onSubmit}
             />
           )}
-          {tab === "history" && <HistoryTab history={history} onOpen={(a) => { setResult(a); setTab("scan"); }} />}
+          {tab === "history" && (
+            <HistoryTab
+              history={history}
+              onOpen={(a) => { setResult(a); setTab("scan"); }}
+              onDelete={onDelete}
+              onToggleFavorite={onToggleFav}
+              onClearAll={onClearAll}
+              signedIn={!!user}
+            />
+          )}
           {tab === "analytics" && <AnalyticsTab history={history} />}
         </main>
       </div>
@@ -668,7 +769,13 @@ function RecommendationsPanel({ result }: { result: PA }) {
 
 /* ---------- History Tab ---------- */
 
-function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => void }) {
+function HistoryTab({
+  history, onOpen, onDelete, onToggleFavorite, onClearAll, signedIn,
+}: {
+  history: HE[]; onOpen: (a: PA) => void;
+  onDelete: (id: string) => void; onToggleFavorite: (id: string) => void;
+  onClearAll: () => void; signedIn: boolean;
+}) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "favorites" | PA["verdict"]>("all");
 
@@ -692,7 +799,9 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
   return (
     <section className="animate-fade-up">
       <h2 className="text-2xl font-semibold tracking-tight">Scan history</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Stored locally in your browser. {history.length} scan{history.length === 1 ? "" : "s"} recorded.</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {signedIn ? "Synced to your account." : "Stored locally in your browser. Sign in to sync across devices."} {history.length} scan{history.length === 1 ? "" : "s"} recorded.
+      </p>
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <div className="flex flex-1 items-center gap-2 rounded-xl border border-border bg-card/60 px-3 py-2">
@@ -714,7 +823,7 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
         <button onClick={exportAll} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card/60 px-3 py-2 text-sm hover:border-primary/40">
           <FileJson className="h-4 w-4" />Export
         </button>
-        <button onClick={() => confirm("Clear all history?") && clearHistory()} className="inline-flex items-center gap-1.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive hover:bg-destructive/20">
+        <button onClick={onClearAll} className="inline-flex items-center gap-1.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive hover:bg-destructive/20">
           <Trash2 className="h-4 w-4" />Clear
         </button>
       </div>
@@ -738,13 +847,13 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
                   {new Date(h.analyzedAt).toLocaleString()} · risk {h.score}/100 · {h.confidence}% confidence
                 </div>
               </div>
-              <button onClick={() => toggleFavorite(h.id)} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-warning" title="Toggle favorite">
+              <button onClick={() => onToggleFavorite(h.id)} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-warning" title="Toggle favorite">
                 {h.favorite ? <Star className="h-4 w-4 fill-warning text-warning" /> : <StarOff className="h-4 w-4" />}
               </button>
               <button onClick={() => onOpen(h.analysis)} className="rounded-lg border border-border bg-background/40 px-3 py-1.5 text-xs hover:border-primary/40 hover:text-primary">
                 View
               </button>
-              <button onClick={() => deleteEntry(h.id)} className="rounded-lg border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10" title="Delete">
+              <button onClick={() => onDelete(h.id)} className="rounded-lg border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10" title="Delete">
                 <Trash2 className="h-4 w-4" />
               </button>
             </li>
