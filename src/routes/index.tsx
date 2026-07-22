@@ -1,18 +1,20 @@
 import type { HistoryEntry as HE } from "@/lib/history";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Shield, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, AlertTriangle,
   CheckCircle2, Search, Sparkles, FileJson, FileText, FileDown, Star, StarOff,
   Trash2, Sun, Moon, History, BarChart3, Info, Globe, Lock, LockOpen, Radar,
-  ClipboardList, Brain, ArrowRight, ExternalLink,
+  ClipboardList, Brain, ArrowRight, ExternalLink, LogIn, LogOut, User as UserIcon,
 } from "lucide-react";
 
 import { analyzeUrl, type PhishingAnalysis as PA } from "@/lib/phishing.functions";
 import { addToHistory, clearHistory, deleteEntry, getHistory, toggleFavorite } from "@/lib/history";
 import { exportCSV, exportJSON, exportPDF } from "@/lib/report";
 import { applyTheme, getTheme, toggleTheme, type Theme } from "@/lib/theme";
+import { useAuth } from "@/hooks/use-auth";
+import { listScans, saveScan, deleteScan, setScanFavorite, clearScans } from "@/lib/scans.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
