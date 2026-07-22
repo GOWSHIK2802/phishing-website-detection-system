@@ -769,7 +769,13 @@ function RecommendationsPanel({ result }: { result: PA }) {
 
 /* ---------- History Tab ---------- */
 
-function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => void }) {
+function HistoryTab({
+  history, onOpen, onDelete, onToggleFavorite, onClearAll, signedIn,
+}: {
+  history: HE[]; onOpen: (a: PA) => void;
+  onDelete: (id: string) => void; onToggleFavorite: (id: string) => void;
+  onClearAll: () => void; signedIn: boolean;
+}) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "favorites" | PA["verdict"]>("all");
 
@@ -793,7 +799,9 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
   return (
     <section className="animate-fade-up">
       <h2 className="text-2xl font-semibold tracking-tight">Scan history</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Stored locally in your browser. {history.length} scan{history.length === 1 ? "" : "s"} recorded.</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {signedIn ? "Synced to your account." : "Stored locally in your browser. Sign in to sync across devices."} {history.length} scan{history.length === 1 ? "" : "s"} recorded.
+      </p>
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <div className="flex flex-1 items-center gap-2 rounded-xl border border-border bg-card/60 px-3 py-2">
@@ -815,7 +823,7 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
         <button onClick={exportAll} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card/60 px-3 py-2 text-sm hover:border-primary/40">
           <FileJson className="h-4 w-4" />Export
         </button>
-        <button onClick={() => confirm("Clear all history?") && clearHistory()} className="inline-flex items-center gap-1.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive hover:bg-destructive/20">
+        <button onClick={onClearAll} className="inline-flex items-center gap-1.5 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive hover:bg-destructive/20">
           <Trash2 className="h-4 w-4" />Clear
         </button>
       </div>
@@ -839,13 +847,13 @@ function HistoryTab({ history, onOpen }: { history: HE[]; onOpen: (a: PA) => voi
                   {new Date(h.analyzedAt).toLocaleString()} · risk {h.score}/100 · {h.confidence}% confidence
                 </div>
               </div>
-              <button onClick={() => toggleFavorite(h.id)} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-warning" title="Toggle favorite">
+              <button onClick={() => onToggleFavorite(h.id)} className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-warning" title="Toggle favorite">
                 {h.favorite ? <Star className="h-4 w-4 fill-warning text-warning" /> : <StarOff className="h-4 w-4" />}
               </button>
               <button onClick={() => onOpen(h.analysis)} className="rounded-lg border border-border bg-background/40 px-3 py-1.5 text-xs hover:border-primary/40 hover:text-primary">
                 View
               </button>
-              <button onClick={() => deleteEntry(h.id)} className="rounded-lg border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10" title="Delete">
+              <button onClick={() => onDelete(h.id)} className="rounded-lg border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10" title="Delete">
                 <Trash2 className="h-4 w-4" />
               </button>
             </li>
