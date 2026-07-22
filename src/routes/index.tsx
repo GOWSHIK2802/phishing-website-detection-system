@@ -58,6 +58,13 @@ function verdictStyle(v: PA["verdict"]) {
 function Index() {
   const router = useRouter();
   const analyze = useServerFn(analyzeUrl);
+  const listScansFn = useServerFn(listScans);
+  const saveScanFn = useServerFn(saveScan);
+  const deleteScanFn = useServerFn(deleteScan);
+  const favoriteScanFn = useServerFn(setScanFavorite);
+  const clearScansFn = useServerFn(clearScans);
+  const { user, signOut } = useAuth();
+
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,11 +77,28 @@ function Index() {
     const t = getTheme();
     applyTheme(t);
     setTheme(t);
-    setHistory(getHistory());
-    const onChange = () => setHistory(getHistory());
-    window.addEventListener("phishguard:history-changed", onChange);
-    return () => window.removeEventListener("phishguard:history-changed", onChange);
   }, []);
+
+  // Load history: DB for signed-in users, localStorage otherwise
+  useEffect(() => {
+    let cancelled = false;
+    if (user) {
+      listScansFn().then((rows) => {
+        if (cancelled) return;
+        setHistory(rows.map((r) => ({
+          id: r.id, analyzedAt: r.analyzedAt, url: r.url, normalizedUrl: r.normalizedUrl,
+          verdict: r.verdict, score: r.score, confidence: r.confidence,
+          favorite: r.favorite, analysis: r.analysis,
+        })));
+      }).catch(() => setHistory([]));
+    } else {
+      setHistory(getHistory());
+      const onChange = () => setHistory(getHistory());
+      window.addEventListener("phishguard:history-changed", onChange);
+      return () => window.removeEventListener("phishguard:history-changed", onChange);
+    }
+    return () => { cancelled = true; };
+  }, [user, listScansFn]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,12 +109,56 @@ function Index() {
     try {
       const data = await analyze({ data: { url } });
       setResult(data);
-      addToHistory(data);
+      if (user) {
+        await saveScanFn({
+          data: {
+            url: data.url, normalizedUrl: data.normalizedUrl, verdict: data.verdict,
+            score: data.score, confidence: data.confidence, analysis: data,
+            analyzedAt: data.analyzedAt,
+          },
+        });
+        const rows = await listScansFn();
+        setHistory(rows.map((r) => ({
+          id: r.id, analyzedAt: r.analyzedAt, url: r.url, normalizedUrl: r.normalizedUrl,
+          verdict: r.verdict, score: r.score, confidence: r.confidence,
+          favorite: r.favorite, analysis: r.analysis,
+        })));
+      } else {
+        addToHistory(data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
       router.invalidate();
+    }
+  }
+
+  async function onDelete(id: string) {
+    if (user) {
+      await deleteScanFn({ data: { id } });
+      setHistory((h) => h.filter((e) => e.id !== id));
+    } else {
+      deleteEntry(id);
+    }
+  }
+  async function onToggleFav(id: string) {
+    if (user) {
+      const cur = history.find((h) => h.id === id);
+      const next = !cur?.favorite;
+      await favoriteScanFn({ data: { id, favorite: next } });
+      setHistory((h) => h.map((e) => (e.id === id ? { ...e, favorite: next } : e)));
+    } else {
+      toggleFavorite(id);
+    }
+  }
+  async function onClearAll() {
+    if (!confirm("Clear all history?")) return;
+    if (user) {
+      await clearScansFn();
+      setHistory([]);
+    } else {
+      clearHistory();
     }
   }
 
@@ -108,7 +176,7 @@ function Index() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <nav className="flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs">
+            <nav className="hidden sm:flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs">
               <TabBtn active={tab === "scan"} onClick={() => setTab("scan")} icon={<Search className="h-3.5 w-3.5" />}>Scan</TabBtn>
               <TabBtn active={tab === "history"} onClick={() => setTab("history")} icon={<History className="h-3.5 w-3.5" />}>History</TabBtn>
               <TabBtn active={tab === "analytics"} onClick={() => setTab("analytics")} icon={<BarChart3 className="h-3.5 w-3.5" />}>Analytics</TabBtn>
@@ -121,8 +189,30 @@ function Index() {
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
+            {user ? (
+              <div className="flex items-center gap-1.5 rounded-full border border-border bg-card/60 pl-2.5 pr-1 py-1 text-xs">
+                <UserIcon className="h-3.5 w-3.5 text-primary" />
+                <span className="hidden sm:inline max-w-[140px] truncate text-foreground/85">{user.email}</span>
+                <button onClick={() => signOut()} title="Sign out"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-destructive">
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Link to="/auth" className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:brightness-110">
+                <LogIn className="h-3.5 w-3.5" /> Sign in
+              </Link>
+            )}
           </div>
         </header>
+
+        <nav className="mx-auto flex max-w-6xl sm:hidden px-6 pb-2">
+          <div className="flex items-center gap-1 rounded-full border border-border bg-card/60 p-1 text-xs w-full">
+            <TabBtn active={tab === "scan"} onClick={() => setTab("scan")} icon={<Search className="h-3.5 w-3.5" />}>Scan</TabBtn>
+            <TabBtn active={tab === "history"} onClick={() => setTab("history")} icon={<History className="h-3.5 w-3.5" />}>History</TabBtn>
+            <TabBtn active={tab === "analytics"} onClick={() => setTab("analytics")} icon={<BarChart3 className="h-3.5 w-3.5" />}>Analytics</TabBtn>
+          </div>
+        </nav>
 
         <main className="mx-auto max-w-5xl px-6 pb-24 pt-4">
           {tab === "scan" && (
@@ -130,7 +220,16 @@ function Index() {
               url={url} setUrl={setUrl} loading={loading} error={error} result={result} onSubmit={onSubmit}
             />
           )}
-          {tab === "history" && <HistoryTab history={history} onOpen={(a) => { setResult(a); setTab("scan"); }} />}
+          {tab === "history" && (
+            <HistoryTab
+              history={history}
+              onOpen={(a) => { setResult(a); setTab("scan"); }}
+              onDelete={onDelete}
+              onToggleFavorite={onToggleFav}
+              onClearAll={onClearAll}
+              signedIn={!!user}
+            />
+          )}
           {tab === "analytics" && <AnalyticsTab history={history} />}
         </main>
       </div>
