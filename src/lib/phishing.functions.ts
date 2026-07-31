@@ -497,6 +497,12 @@ export const analyzeUrl = createServerFn({ method: "POST" })
       fetchThreatIntel(normalizedUrl),
     ]);
 
+    // ---- XGBoost inference (primary classifier) ----
+    const featureVector = buildFeatureVector(features, heuristics, metadata, threatIntel);
+    const prediction = predict(featureVector);
+    const modelScore = Math.round(prediction.probability * 100);
+    const topContribs = prediction.contributions.slice(0, 8);
+
     const systemPrompt = `You are a cybersecurity analyst specializing in phishing detection. You analyze URLs from their string, structure, heuristic signals, WHOIS/RDAP metadata, and threat-intel feeds. You NEVER visit URLs. Be concise, factual, and cautious.`;
 
     const userPrompt = `Analyze this URL for phishing risk.
@@ -514,7 +520,15 @@ Threat intel (URLhaus): ${threatIntel.reported ? `REPORTED (${threatIntel.threat
 Heuristic signals (${triggered.length}/${heuristics.length} triggered):
 ${heuristics.map((h) => `- [${h.triggered ? "X" : " "}] (${h.weight}) ${h.label}: ${h.detail}`).join("\n")}
 
-Preliminary heuristic score: ${heuristicScore}/100
+XGBoost classifier output (gradient-boosted decision trees, ${XGB_METRICS.rounds} rounds, test accuracy ${(XGB_METRICS.accuracy * 100).toFixed(1)}%):
+- Phishing probability: ${(prediction.probability * 100).toFixed(1)}%
+- Raw log-odds margin: ${prediction.margin.toFixed(3)}
+- Top signed feature contributions (positive = pushes toward phishing):
+${topContribs.map((c) => `  - ${XGB_LABELS[c.feature] ?? c.feature} = ${c.value} -> ${c.contribution >= 0 ? "+" : ""}${c.contribution}`).join("\n")}
+
+Rule-based cross-check score: ${heuristicScore}/100
+
+The XGBoost probability is the authoritative risk score. Keep "score" within 10 points of ${modelScore} unless the threat feed says otherwise. Explain the model's reasoning in plain language.
 
 Return ONLY a JSON object with:
 - "score": integer 0-100 (final risk)
@@ -559,13 +573,18 @@ No markdown, no code fences.`;
       parsed = match ? JSON.parse(match[0]) : {};
     }
 
-    let score = Math.max(0, Math.min(100, Math.round(parsed.score ?? heuristicScore)));
+    const aiScore = Number.isFinite(parsed.score) ? Math.max(0, Math.min(100, Math.round(parsed.score))) : modelScore;
+    // Blend: the XGBoost ensemble carries most of the weight, the LLM adjusts.
+    let score = Math.round(modelScore * 0.7 + aiScore * 0.3);
     if (threatIntel.reported) score = Math.max(score, 90);
 
     const verdict: PhishingVerdict =
       parsed.verdict ?? (score >= 65 ? "dangerous" : score >= 30 ? "suspicious" : "safe");
 
-    const confidence = Math.max(0, Math.min(100, Math.round(parsed.confidence ?? (60 + triggered.length * 4))));
+    const aiConfidence = Number.isFinite(parsed.confidence)
+      ? Math.max(0, Math.min(100, Math.round(parsed.confidence)))
+      : prediction.confidence;
+    const confidence = Math.max(0, Math.min(100, Math.round(prediction.confidence * 0.7 + aiConfidence * 0.3)));
 
     const redFlagsRaw = parsed.redFlags ?? [];
     const redFlags = Array.isArray(redFlagsRaw)
@@ -576,7 +595,7 @@ No markdown, no code fences.`;
         )
       : [];
 
-    const featureImportance = computeFeatureImportance(heuristics, features, threatIntel);
+    const featureImportance = computeFeatureImportance(prediction);
     const recommendations = buildRecommendations(verdict, features, threatIntel);
 
     return {
@@ -603,6 +622,23 @@ No markdown, no code fences.`;
       metadata,
       threatIntel,
       featureImportance,
+      model: {
+        name: "PhishGuard XGBoost v1",
+        algorithm: "XGBoost (gradient-boosted decision trees)",
+        objective: "binary:logistic",
+        rounds: XGB_METRICS.rounds,
+        maxDepth: XGB_METRICS.maxDepth,
+        learningRate: XGB_METRICS.learningRate,
+        trainedOn: XGB_METRICS.trainedOn,
+        accuracy: XGB_METRICS.accuracy,
+        auc: XGB_METRICS.auc,
+        probability: Math.round(prediction.probability * 1000) / 1000,
+        margin: Math.round(prediction.margin * 1000) / 1000,
+        topGain: Object.entries(XGB_GAIN)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6)
+          .map(([feature, gain]) => ({ feature: XGB_LABELS[feature] ?? feature, gain })),
+      },
       aiExplanation: parsed.aiExplanation ?? parsed.summary ?? "",
       analyzedAt: new Date().toISOString(),
     };
