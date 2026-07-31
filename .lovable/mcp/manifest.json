@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "sdk_version": "0.26.1",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://trxchdtwznqdlaswoawt.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "phish-guard-ai",
+      "version": "0.1.0",
+      "title": "Phish Guard AI"
+    },
+    "tools": [
+      {
+        "name": "analyze_url",
+        "title": "Analyze URL for phishing",
+        "description": "Run the PhishGuard AI phishing analysis on a URL. Returns a risk score (0-100), verdict, confidence, red flags, security heuristics, URL features, domain metadata and threat-intelligence results. Optionally saves the scan to the signed-in user's history.",
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The website URL to analyze, e.g. https://example.com"
+            },
+            "save": {
+              "description": "Save the result to the signed-in user's scan history (default true).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_scans",
+        "title": "List scan history",
+        "description": "List the signed-in user's saved phishing scans, newest first. Optionally filter by verdict, favorites, or a URL substring.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "description": "Max rows to return (default 20, max 100).",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "verdict": {
+              "description": "Filter by verdict.",
+              "type": "string",
+              "enum": [
+                "safe",
+                "suspicious",
+                "dangerous"
+              ]
+            },
+            "favoritesOnly": {
+              "description": "Only return favorited scans.",
+              "type": "boolean"
+            },
+            "search": {
+              "description": "Case-insensitive substring match on the URL.",
+              "type": "string"
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_scan",
+        "title": "Get scan details",
+        "description": "Fetch the full stored analysis for one of the signed-in user's saved scans, including heuristics, URL features, domain metadata, threat intel and AI explanation.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The scan id returned by list_scans."
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_scan_favorite",
+        "title": "Favorite or unfavorite a scan",
+        "description": "Mark one of the signed-in user's saved scans as a favorite, or remove the favorite flag.",
+        "annotations": {
+          "readOnlyHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The scan id."
+            },
+            "favorite": {
+              "type": "boolean",
+              "description": "true to favorite, false to unfavorite."
+            }
+          },
+          "required": [
+            "id",
+            "favorite"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "delete_scan",
+        "title": "Delete a scan",
+        "description": "Permanently delete one of the signed-in user's saved phishing scans by id.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The scan id to delete."
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
