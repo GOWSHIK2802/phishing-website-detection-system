@@ -634,6 +634,15 @@ function SimpleList({
   );
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/50 px-2.5 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
 function ExplainablePanel({ result }: { result: PA }) {
   const max = Math.max(1, ...result.featureImportance.map((f) => f.contribution));
   const m = result.model;
