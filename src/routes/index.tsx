@@ -636,17 +636,48 @@ function SimpleList({
 
 function ExplainablePanel({ result }: { result: PA }) {
   const max = Math.max(1, ...result.featureImportance.map((f) => f.contribution));
+  const m = result.model;
   return (
     <div className="rounded-2xl border border-border bg-card/60 p-5 backdrop-blur">
       <div className="mb-3 flex items-center gap-2">
         <Brain className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-semibold">Explainable AI</h3>
+        {m && (
+          <span className="ml-auto rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+            XGBoost
+          </span>
+        )}
       </div>
       <p className="text-sm text-foreground/85">{result.aiExplanation}</p>
       <div className="mt-2 text-xs text-muted-foreground">
         Confidence: <span className="text-foreground">{result.confidence}%</span> · Risk score: <span className="text-foreground">{result.score}/100</span>
       </div>
+
+      {m && (
+        <div className="mt-4 rounded-xl border border-border bg-background/40 p-3">
+          <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Model prediction</div>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <Stat label="Phishing prob." value={`${(m.probability * 100).toFixed(1)}%`} />
+            <Stat label="Log-odds" value={m.margin.toFixed(2)} />
+            <Stat label="Test accuracy" value={`${(m.accuracy * 100).toFixed(1)}%`} />
+            <Stat label="ROC AUC" value={m.auc.toFixed(3)} />
+          </div>
+          <div className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+            {m.algorithm} · objective <span className="text-foreground/80">{m.objective}</span> ·{" "}
+            {m.rounds} boosting rounds, max depth {m.maxDepth}, learning rate {m.learningRate} ·
+            trained on {m.trainedOn.toLocaleString()} labelled samples. Contributions below are exact
+            per-feature attributions of the ensemble's log-odds output.
+          </div>
+          {m.topGain.length > 0 && (
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              Global feature gain: {m.topGain.map((g) => g.feature).join(" · ")}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mt-4">
+
         <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Feature importance</div>
         <ul className="space-y-2">
           {result.featureImportance.map((f) => (
