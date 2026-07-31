@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { predict, XGB_METRICS, XGB_GAIN, type XgbPrediction } from "./xgboost";
 
 const InputSchema = z.object({
   url: z.string().trim().min(1),
@@ -59,6 +60,21 @@ export interface FeatureContribution {
   explanation: string;
 }
 
+export interface ModelInfo {
+  name: string;
+  algorithm: string;
+  objective: string;
+  rounds: number;
+  maxDepth: number;
+  learningRate: number;
+  trainedOn: number;
+  accuracy: number;
+  auc: number;
+  probability: number; // 0-1 phishing probability from the ensemble
+  margin: number; // raw log-odds
+  topGain: { feature: string; gain: number }[];
+}
+
 export interface PhishingAnalysis {
   url: string;
   normalizedUrl: string;
@@ -81,6 +97,7 @@ export interface PhishingAnalysis {
   metadata: DomainMetadata;
   threatIntel: ThreatIntel;
   featureImportance: FeatureContribution[];
+  model: ModelInfo;
   aiExplanation: string;
   analyzedAt: string;
 }
@@ -348,27 +365,97 @@ async function fetchThreatIntel(url: string): Promise<ThreatIntel> {
   return intel;
 }
 
-function computeFeatureImportance(
-  heuristics: PhishingAnalysis["heuristics"],
+const XGB_LABELS: Record<string, string> = {
+  url_length: "URL length",
+  domain_length: "Domain length",
+  num_dots: "Number of dots",
+  num_hyphens: "Hyphens in host",
+  num_digits: "Digits in host",
+  num_special: "Special characters",
+  num_subdomains: "Subdomain depth",
+  https: "HTTPS enabled",
+  entropy: "Hostname entropy",
+  encoded_chars: "URL-encoded characters",
+  suspicious_tld: "Suspicious TLD",
+  has_ip: "IP address as host",
+  punycode: "Punycode / IDN host",
+  has_at: "@ symbol in URL",
+  is_shortener: "URL shortener",
+  brand_impersonation: "Brand name misuse",
+  typosquat: "Typosquatting",
+  sensitive_keywords: "Sensitive keywords in path",
+  nonstandard_port: "Non-standard port",
+  domain_age_days: "Domain age",
+  threat_listed: "Threat-feed listing",
+  redirect_count: "Redirect chain length",
+};
+
+const XGB_EXPLANATIONS: Record<string, string> = {
+  url_length: "The model learned that unusually long URLs are typical of phishing pages that bury the real destination.",
+  domain_length: "Very long registered domains are rare for legitimate brands but common for throwaway phishing domains.",
+  num_dots: "Many dots mean deep subdomain nesting, which hides the real registered domain.",
+  num_hyphens: "Hyphen-heavy hosts like 'secure-login-verify' are a strong learned phishing pattern.",
+  num_digits: "Digit-heavy hostnames often come from auto-generated phishing infrastructure.",
+  num_special: "Unusual characters in a URL are used to confuse users and evade simple filters.",
+  num_subdomains: "Extra subdomain levels let attackers place a trusted brand name where the domain normally appears.",
+  https: "Encrypted transport is a mild trust signal; its absence pushes the prediction toward phishing.",
+  entropy: "Random-looking hostnames (high entropy) are typical of machine-generated malicious domains.",
+  encoded_chars: "%XX escape sequences are used to hide keywords or payloads from filters.",
+  suspicious_tld: "Free or cheap top-level domains are disproportionately used in phishing campaigns.",
+  has_ip: "A raw IP instead of a domain name is one of the strongest phishing indicators the model learned.",
+  punycode: "Punycode hosts imitate real brands using lookalike Unicode characters.",
+  has_at: "Browsers ignore everything before '@', so attackers use it to fake the visible domain.",
+  is_shortener: "Shortened links hide the true destination from both the user and static filters.",
+  brand_impersonation: "A known brand appearing outside the registered domain is a classic impersonation pattern.",
+  typosquat: "The domain is only one or two edits away from a real brand name.",
+  sensitive_keywords: "Words like login, verify or update in the path are common on credential-harvesting pages.",
+  nonstandard_port: "Legitimate login pages do not run on unusual ports.",
+  domain_age_days: "Newly registered domains carry far more risk; long-established domains lower the score.",
+  threat_listed: "The URL appears on a public malware/phishing feed, which dominates the prediction.",
+  redirect_count: "Long redirect chains are used to launder traffic and evade blocklists.",
+};
+
+function buildFeatureVector(
   features: UrlFeatures,
+  heuristics: PhishingAnalysis["heuristics"],
+  metadata: DomainMetadata,
   intel: ThreatIntel,
-): FeatureContribution[] {
-  const weightMap = { low: 6, medium: 14, high: 22 } as const;
-  const contribs: FeatureContribution[] = [];
-  for (const h of heuristics) {
-    if (h.triggered) {
-      contribs.push({
-        feature: h.label,
-        contribution: weightMap[h.weight],
-        direction: "risk",
-        explanation: h.explanation,
-      });
-    }
-  }
-  if (features.httpsStatus) contribs.push({ feature: "HTTPS enabled", contribution: 8, direction: "safe", explanation: "Encrypted transport is present." });
-  if (features.tldType === "common") contribs.push({ feature: "Common TLD", contribution: 6, direction: "safe", explanation: "TLD is a well-established one (.com/.org/etc.)." });
-  if (intel.reported) contribs.push({ feature: "Listed on threat feed", contribution: 40, direction: "risk", explanation: "URLhaus has an active record for this URL." });
-  return contribs.sort((a, b) => b.contribution - a.contribution).slice(0, 8);
+): Record<string, number> {
+  const on = (label: string) => (heuristics.find((h) => h.label === label)?.triggered ? 1 : 0);
+  return {
+    url_length: features.urlLength,
+    domain_length: features.domainLength,
+    num_dots: features.numDots,
+    num_hyphens: features.numHyphens,
+    num_digits: features.numDigits,
+    num_special: features.numSpecialChars,
+    num_subdomains: features.numSubdomains,
+    https: features.httpsStatus ? 1 : 0,
+    entropy: features.entropy,
+    encoded_chars: features.encodedCharCount,
+    suspicious_tld: features.tldType === "suspicious" ? 1 : 0,
+    has_ip: on("IP address as host"),
+    punycode: on("Punycode / IDN homograph"),
+    has_at: on("@ symbol in URL"),
+    is_shortener: on("Uses URL shortener"),
+    brand_impersonation: on("Brand name in subdomain or path"),
+    typosquat: on("Typosquatting suspected"),
+    sensitive_keywords: on("Sensitive action words in path"),
+    nonstandard_port: on("Non-standard port"),
+    domain_age_days: metadata.domainAgeDays ?? 365,
+    threat_listed: intel.reported ? 1 : 0,
+    redirect_count: Math.max(0, metadata.redirectChain.length - 1),
+  };
+}
+
+function computeFeatureImportance(prediction: XgbPrediction): FeatureContribution[] {
+  const total = prediction.contributions.reduce((s, c) => s + Math.abs(c.contribution), 0) || 1;
+  return prediction.contributions.slice(0, 8).map((c) => ({
+    feature: XGB_LABELS[c.feature] ?? c.feature,
+    contribution: Math.round((Math.abs(c.contribution) / total) * 100),
+    direction: c.contribution >= 0 ? ("risk" as const) : ("safe" as const),
+    explanation: XGB_EXPLANATIONS[c.feature] ?? "Contributed to the gradient-boosted model's prediction.",
+  }));
 }
 
 function buildRecommendations(verdict: PhishingVerdict, features: UrlFeatures, intel: ThreatIntel): string[] {
