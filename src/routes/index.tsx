@@ -106,14 +106,13 @@ function Index() {
     return () => { cancelled = true; };
   }, [user, listScansFn]);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!url.trim()) return;
+  async function runScan(target: string) {
+    if (!target.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const data = await analyze({ data: { url } });
+      const data = await analyze({ data: { url: target } });
       setResult(data);
       if (user) {
         await saveScanFn({
@@ -139,6 +138,17 @@ function Index() {
       router.invalidate();
     }
   }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await runScan(url);
+  }
+
+  function onQrUrl(decoded: string) {
+    setUrl(decoded);
+    void runScan(decoded);
+  }
+
 
   async function onDelete(id: string) {
     if (user) {
