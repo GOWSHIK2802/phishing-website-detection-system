@@ -15,6 +15,12 @@ import { exportCSV, exportJSON, exportPDF } from "@/lib/report";
 import { applyTheme, getTheme, toggleTheme, type Theme } from "@/lib/theme";
 import { useAuth } from "@/hooks/use-auth";
 import { listScans, saveScan, deleteScan, setScanFavorite, clearScans } from "@/lib/scans.functions";
+import { DetectionSummary } from "@/components/detection-summary";
+import { AiReasonCards } from "@/components/ai-reasons";
+import { WebsiteInfoPanel } from "@/components/website-info";
+import { ThreatIntelligenceGrid } from "@/components/threat-services";
+import { QrScanner } from "@/components/qr-scanner";
+import { SecurityChatbot } from "@/components/security-chatbot";
 
 export const Route = createFileRoute("/")({
   head: () => ({
