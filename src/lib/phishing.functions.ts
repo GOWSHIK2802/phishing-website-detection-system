@@ -625,6 +625,7 @@ function buildRecommendations(verdict: PhishingVerdict, features: UrlFeatures, i
 export const analyzeUrl = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => InputSchema.parse(data))
   .handler(async ({ data }): Promise<PhishingAnalysis> => {
+    const startedAt = Date.now();
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
 
@@ -642,10 +643,13 @@ export const analyzeUrl = createServerFn({ method: "POST" })
     const triggered = heuristics.filter((h) => h.triggered);
 
     // Parallel external lookups
-    const [metadata, threatIntel] = await Promise.all([
+    const [metadata, threatIntel, dns] = await Promise.all([
       fetchMetadata(parsedUrl, registrable),
       fetchThreatIntel(normalizedUrl),
+      fetchDns(host),
     ]);
+    if (!metadata.hostingCountry && dns.hostingCountry) metadata.hostingCountry = dns.hostingCountry;
+
 
     // ---- XGBoost inference (primary classifier) ----
     const featureVector = buildFeatureVector(features, heuristics, metadata, threatIntel);
