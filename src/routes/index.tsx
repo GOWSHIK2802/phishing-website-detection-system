@@ -266,10 +266,10 @@ function TabBtn({ active, onClick, children, icon }: { active: boolean; onClick:
 }
 
 function ScanTab({
-  url, setUrl, loading, error, result, onSubmit,
+  url, setUrl, loading, error, result, onSubmit, onQrUrl,
 }: {
   url: string; setUrl: (s: string) => void; loading: boolean; error: string | null;
-  result: PA | null; onSubmit: (e: FormEvent) => void;
+  result: PA | null; onSubmit: (e: FormEvent) => void; onQrUrl: (url: string) => void;
 }) {
   return (
     <>
