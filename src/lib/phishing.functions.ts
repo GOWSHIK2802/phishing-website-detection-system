@@ -795,5 +795,10 @@ No markdown, no code fences.`;
       },
       aiExplanation: parsed.aiExplanation ?? parsed.summary ?? "",
       analyzedAt: new Date().toISOString(),
+      dns,
+      threatServices: buildThreatServices(metadata, dns, threatIntel, features),
+      scanDurationMs: Date.now() - startedAt,
+      threatLevel: computeThreatLevel(score, threatIntel.reported),
     };
+
   });
