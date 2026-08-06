@@ -43,6 +43,16 @@ export function exportCSV(a: PhishingAnalysis) {
   rows.push(["Expiration Date", a.metadata.expirationDate].map(esc).join(","));
   rows.push(["Domain Age (days)", a.metadata.domainAgeDays].map(esc).join(","));
   rows.push(["HTTPS", a.features.httpsStatus].map(esc).join(","));
+  rows.push(["Threat Level", a.threatLevel ?? ""].map(esc).join(","));
+  rows.push(["Scan Duration (ms)", a.scanDurationMs ?? ""].map(esc).join(","));
+  rows.push(["IP Address", a.dns?.ipAddress ?? ""].map(esc).join(","));
+  rows.push(["Hosting Country", a.dns?.hostingCountry ?? a.metadata.hostingCountry ?? ""].map(esc).join(","));
+  rows.push(["DNS Status", a.dns?.status ?? ""].map(esc).join(","));
+  if (a.threatServices?.length) {
+    rows.push([""].map(esc).join(","));
+    rows.push(["Intel Source", "Status", "Detail"].map(esc).join(","));
+    for (const s of a.threatServices) rows.push([s.name, s.status, s.detail].map(esc).join(","));
+  }
   rows.push([""].map(esc).join(","));
   rows.push(["Red Flag", "Explanation"].map(esc).join(","));
   for (const r of a.redFlags) rows.push([r.label, r.explanation].map(esc).join(","));
@@ -76,19 +86,29 @@ export function exportPDF(a: PhishingAnalysis) {
 </style></head><body>
 <h1>PhishGuard AI Report</h1>
 <small>Generated ${new Date(a.analyzedAt).toLocaleString()}</small>
-<p><span class="badge">${a.verdict}</span> &nbsp; Risk score <strong>${a.score}/100</strong> &nbsp; Confidence <strong>${a.confidence}%</strong></p>
+<p><span class="badge">${a.verdict}</span> &nbsp; Risk score <strong>${a.score}/100</strong> &nbsp; Confidence <strong>${a.confidence}%</strong> &nbsp; Threat level <strong>${escapeHtml(a.threatLevel ?? "n/a")}</strong>${a.scanDurationMs != null ? ` &nbsp; Scan took <strong>${(a.scanDurationMs / 1000).toFixed(2)}s</strong>` : ""}</p>
 <div class="card"><div class="k">URL</div><div style="font-family:monospace;word-break:break-all">${escapeHtml(a.normalizedUrl)}</div></div>
 <h3>Summary</h3><p>${escapeHtml(a.summary)}</p>
 <h3>AI Explanation</h3><p>${escapeHtml(a.aiExplanation)}</p>
-<h3>Recommendation</h3><p>${escapeHtml(a.recommendation)}</p>
+<h3>Security recommendation</h3><p>${escapeHtml(a.recommendation)}</p>
+<h3>Website information</h3>
 <div class="grid">
+  <div class="card"><div class="k">Domain</div>${escapeHtml(a.metadata.registrableDomain)}</div>
   <div class="card"><div class="k">Registrar</div>${escapeHtml(a.metadata.registrar ?? "unknown")}</div>
   <div class="card"><div class="k">Registration</div>${escapeHtml(a.metadata.registrationDate ?? "unknown")}</div>
   <div class="card"><div class="k">Expiration</div>${escapeHtml(a.metadata.expirationDate ?? "unknown")}</div>
   <div class="card"><div class="k">Domain age (days)</div>${a.metadata.domainAgeDays ?? "unknown"}</div>
+  <div class="card"><div class="k">IP address</div>${escapeHtml(a.dns?.ipAddress ?? "unresolved")}</div>
+  <div class="card"><div class="k">Hosting country</div>${escapeHtml(a.dns?.hostingCountry ?? a.metadata.hostingCountry ?? "unknown")}</div>
+  <div class="card"><div class="k">DNS status</div>${escapeHtml(a.dns?.status ?? "not checked")}</div>
   <div class="card"><div class="k">HTTPS</div>${a.features.httpsStatus ? "Yes" : "No"}</div>
+  <div class="card"><div class="k">SSL certificate</div>${a.metadata.ssl.httpsReachable ? "Valid TLS handshake" : "Not verifiable"}</div>
   <div class="card"><div class="k">Threat feed</div>${a.threatIntel.reported ? `Reported (${escapeHtml(a.threatIntel.threat ?? "")})` : "Not reported"}</div>
 </div>
+${a.threatServices?.length ? `<h3>Threat intelligence</h3>
+<table><thead><tr><th>Source</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+${a.threatServices.map((s) => `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.status)}</td><td>${escapeHtml(s.detail)}</td></tr>`).join("")}
+</tbody></table>` : ""}
 <h3>Red flags</h3><ul>${a.redFlags.map(flag).join("")}</ul>
 <h3>Security indicators</h3>
 <table><thead><tr><th>Indicator</th><th>Triggered</th><th>Weight</th><th>Detail</th></tr></thead><tbody>

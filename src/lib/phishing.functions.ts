@@ -53,12 +53,33 @@ export interface ThreatIntel {
   error: string | null;
 }
 
+export interface DnsInfo {
+  resolved: boolean;
+  status: string;
+  ipAddress: string | null;
+  ipAddresses: string[];
+  hostingCountry: string | null;
+  hostingOrg: string | null;
+}
+
+export type ServiceStatus = "safe" | "detected" | "unavailable" | "info";
+
+export interface ThreatService {
+  name: string;
+  status: ServiceStatus;
+  detail: string;
+  checkedAt: string;
+}
+
+export type ThreatLevel = "low" | "medium" | "high" | "critical";
+
 export interface FeatureContribution {
   feature: string;
   contribution: number; // 0-100 relative importance
   direction: "risk" | "safe";
   explanation: string;
 }
+
 
 export interface ModelInfo {
   name: string;
@@ -100,7 +121,12 @@ export interface PhishingAnalysis {
   model: ModelInfo;
   aiExplanation: string;
   analyzedAt: string;
+  dns?: DnsInfo;
+  threatServices?: ThreatService[];
+  scanDurationMs?: number;
+  threatLevel?: ThreatLevel;
 }
+
 
 function normalize(raw: string): string {
   let u = raw.trim();
@@ -365,6 +391,130 @@ async function fetchThreatIntel(url: string): Promise<ThreatIntel> {
   return intel;
 }
 
+/** DNS-over-HTTPS resolution + IP geolocation (no API keys required). */
+async function fetchDns(host: string): Promise<DnsInfo> {
+  const info: DnsInfo = {
+    resolved: false,
+    status: "unresolved",
+    ipAddress: null,
+    ipAddresses: [],
+    hostingCountry: null,
+    hostingOrg: null,
+  };
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+    info.resolved = true;
+    info.status = "literal IP (no DNS record)";
+    info.ipAddress = host;
+    info.ipAddresses = [host];
+  } else {
+    try {
+      const r = await fetchWithTimeout(`https://dns.google/resolve?name=${encodeURIComponent(host)}&type=A`, {
+        timeoutMs: 4000,
+        headers: { accept: "application/dns-json" },
+      });
+      if (r.ok) {
+        const j: any = await r.json();
+        const answers: any[] = j.Answer ?? [];
+        const ips = answers.filter((a) => a.type === 1).map((a) => String(a.data));
+        info.ipAddresses = ips;
+        info.ipAddress = ips[0] ?? null;
+        info.resolved = ips.length > 0;
+        info.status = ips.length > 0 ? "resolved (NOERROR)" : j.Status === 3 ? "NXDOMAIN — domain does not resolve" : "no A record";
+      }
+    } catch {
+      info.status = "lookup failed";
+    }
+  }
+
+  if (info.ipAddress) {
+    try {
+      const g = await fetchWithTimeout(`https://ipwho.is/${info.ipAddress}`, { timeoutMs: 4000 });
+      if (g.ok) {
+        const j: any = await g.json();
+        if (j.success !== false) {
+          info.hostingCountry = j.country ?? null;
+          info.hostingOrg = j.connection?.org ?? j.connection?.isp ?? null;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return info;
+}
+
+function buildThreatServices(
+  metadata: DomainMetadata,
+  dns: DnsInfo,
+  intel: ThreatIntel,
+  features: UrlFeatures,
+): ThreatService[] {
+  const at = new Date().toISOString();
+  return [
+    {
+      name: "WHOIS / RDAP",
+      status: metadata.registrar || metadata.registrationDate ? "info" : "unavailable",
+      detail: metadata.registrar
+        ? `${metadata.registrar}${metadata.domainAgeDays !== null ? ` · domain ${metadata.domainAgeDays} days old` : ""}`
+        : "No registration record returned",
+      checkedAt: at,
+    },
+    {
+      name: "DNS lookup",
+      status: dns.resolved ? "safe" : "unavailable",
+      detail: dns.resolved ? `${dns.status} → ${dns.ipAddress}` : dns.status,
+      checkedAt: at,
+    },
+    {
+      name: "SSL certificate",
+      status: features.httpsStatus && metadata.ssl.httpsReachable ? "safe" : "unavailable",
+      detail: metadata.ssl.httpsReachable
+        ? `Valid TLS handshake (HTTP ${metadata.ssl.status ?? "—"})`
+        : metadata.ssl.error ?? "HTTPS endpoint not reachable",
+      checkedAt: at,
+    },
+    {
+      name: "URLhaus (abuse.ch)",
+      status: intel.reported ? "detected" : intel.checked ? "safe" : "unavailable",
+      detail: intel.reported ? `Listed as ${intel.threat ?? "malicious"}` : intel.checked ? "Not present on feed" : "Feed unreachable",
+      checkedAt: at,
+    },
+    {
+      name: "Google Safe Browsing",
+      status: "unavailable",
+      detail: "Requires a Safe Browsing API key — not configured",
+      checkedAt: at,
+    },
+    {
+      name: "VirusTotal",
+      status: "unavailable",
+      detail: "Requires a VirusTotal API key — not configured",
+      checkedAt: at,
+    },
+    {
+      name: "OpenPhish",
+      status: "unavailable",
+      detail: "Commercial feed — public sample not queried",
+      checkedAt: at,
+    },
+    {
+      name: "PhishTank",
+      status: "unavailable",
+      detail: "Requires a PhishTank application key — not configured",
+      checkedAt: at,
+    },
+  ];
+}
+
+function computeThreatLevel(score: number, reported: boolean): ThreatLevel {
+  if (reported || score >= 85) return "critical";
+  if (score >= 65) return "high";
+  if (score >= 30) return "medium";
+  return "low";
+}
+
+
+
 const XGB_LABELS: Record<string, string> = {
   url_length: "URL length",
   domain_length: "Domain length",
@@ -475,6 +625,7 @@ function buildRecommendations(verdict: PhishingVerdict, features: UrlFeatures, i
 export const analyzeUrl = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => InputSchema.parse(data))
   .handler(async ({ data }): Promise<PhishingAnalysis> => {
+    const startedAt = Date.now();
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
 
@@ -492,10 +643,13 @@ export const analyzeUrl = createServerFn({ method: "POST" })
     const triggered = heuristics.filter((h) => h.triggered);
 
     // Parallel external lookups
-    const [metadata, threatIntel] = await Promise.all([
+    const [metadata, threatIntel, dns] = await Promise.all([
       fetchMetadata(parsedUrl, registrable),
       fetchThreatIntel(normalizedUrl),
+      fetchDns(host),
     ]);
+    if (!metadata.hostingCountry && dns.hostingCountry) metadata.hostingCountry = dns.hostingCountry;
+
 
     // ---- XGBoost inference (primary classifier) ----
     const featureVector = buildFeatureVector(features, heuristics, metadata, threatIntel);
@@ -641,5 +795,10 @@ No markdown, no code fences.`;
       },
       aiExplanation: parsed.aiExplanation ?? parsed.summary ?? "",
       analyzedAt: new Date().toISOString(),
+      dns,
+      threatServices: buildThreatServices(metadata, dns, threatIntel, features),
+      scanDurationMs: Date.now() - startedAt,
+      threatLevel: computeThreatLevel(score, threatIntel.reported),
     };
+
   });

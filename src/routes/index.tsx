@@ -15,6 +15,12 @@ import { exportCSV, exportJSON, exportPDF } from "@/lib/report";
 import { applyTheme, getTheme, toggleTheme, type Theme } from "@/lib/theme";
 import { useAuth } from "@/hooks/use-auth";
 import { listScans, saveScan, deleteScan, setScanFavorite, clearScans } from "@/lib/scans.functions";
+import { DetectionSummary } from "@/components/detection-summary";
+import { AiReasonCards } from "@/components/ai-reasons";
+import { WebsiteInfoPanel } from "@/components/website-info";
+import { ThreatIntelligenceGrid } from "@/components/threat-services";
+import { QrScanner } from "@/components/qr-scanner";
+import { SecurityChatbot } from "@/components/security-chatbot";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -100,14 +106,13 @@ function Index() {
     return () => { cancelled = true; };
   }, [user, listScansFn]);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!url.trim()) return;
+  async function runScan(target: string) {
+    if (!target.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const data = await analyze({ data: { url } });
+      const data = await analyze({ data: { url: target } });
       setResult(data);
       if (user) {
         await saveScanFn({
@@ -133,6 +138,17 @@ function Index() {
       router.invalidate();
     }
   }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await runScan(url);
+  }
+
+  function onQrUrl(decoded: string) {
+    setUrl(decoded);
+    void runScan(decoded);
+  }
+
 
   async function onDelete(id: string) {
     if (user) {
@@ -199,7 +215,7 @@ function Index() {
                 </button>
               </div>
             ) : (
-              <Link to="/auth" className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:brightness-110">
+              <Link to="/auth" search={{ next: "/" }} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:brightness-110">
                 <LogIn className="h-3.5 w-3.5" /> Sign in
               </Link>
             )}
@@ -218,6 +234,7 @@ function Index() {
           {tab === "scan" && (
             <ScanTab
               url={url} setUrl={setUrl} loading={loading} error={error} result={result} onSubmit={onSubmit}
+              onQrUrl={onQrUrl}
             />
           )}
           {tab === "history" && (
@@ -232,6 +249,7 @@ function Index() {
           )}
           {tab === "analytics" && <AnalyticsTab history={history} />}
         </main>
+        <SecurityChatbot result={result} />
       </div>
     </div>
   );
@@ -249,10 +267,10 @@ function TabBtn({ active, onClick, children, icon }: { active: boolean; onClick:
 }
 
 function ScanTab({
-  url, setUrl, loading, error, result, onSubmit,
+  url, setUrl, loading, error, result, onSubmit, onQrUrl,
 }: {
   url: string; setUrl: (s: string) => void; loading: boolean; error: string | null;
-  result: PA | null; onSubmit: (e: FormEvent) => void;
+  result: PA | null; onSubmit: (e: FormEvent) => void; onQrUrl: (url: string) => void;
 }) {
   return (
     <>
@@ -316,6 +334,8 @@ function ScanTab({
             </button>
           ))}
         </div>
+
+        <QrScanner onDecoded={onQrUrl} />
 
         {loading && <LoadingStages />}
 
@@ -395,11 +415,24 @@ function ResultView({ result }: { result: PA }) {
         </div>
       </div>
 
+      {/* AI security report */}
+      <DetectionSummary result={result} />
+
+      {/* AI explanation cards */}
+      <AiReasonCards result={result} />
+
+      {/* Website information */}
+      <WebsiteInfoPanel result={result} />
+
+      {/* Threat intelligence sources */}
+      <ThreatIntelligenceGrid result={result} />
+
       {/* Threat intel + metadata */}
       <div className="grid gap-5 md:grid-cols-2">
         <ThreatIntelPanel result={result} />
         <MetadataPanel result={result} />
       </div>
+
 
       {/* Red flags & green flags */}
       <div className="grid gap-5 md:grid-cols-2">
