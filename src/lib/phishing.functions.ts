@@ -121,7 +121,12 @@ export interface PhishingAnalysis {
   model: ModelInfo;
   aiExplanation: string;
   analyzedAt: string;
+  dns?: DnsInfo;
+  threatServices?: ThreatService[];
+  scanDurationMs?: number;
+  threatLevel?: ThreatLevel;
 }
+
 
 function normalize(raw: string): string {
   let u = raw.trim();
