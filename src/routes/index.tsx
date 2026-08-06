@@ -334,6 +334,8 @@ function ScanTab({
           ))}
         </div>
 
+        <QrScanner onDecoded={onQrUrl} />
+
         {loading && <LoadingStages />}
 
         {error && (
