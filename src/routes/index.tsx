@@ -249,6 +249,7 @@ function Index() {
           )}
           {tab === "analytics" && <AnalyticsTab history={history} />}
         </main>
+        <SecurityChatbot result={result} />
       </div>
     </div>
   );
