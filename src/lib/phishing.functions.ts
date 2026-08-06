@@ -53,12 +53,33 @@ export interface ThreatIntel {
   error: string | null;
 }
 
+export interface DnsInfo {
+  resolved: boolean;
+  status: string;
+  ipAddress: string | null;
+  ipAddresses: string[];
+  hostingCountry: string | null;
+  hostingOrg: string | null;
+}
+
+export type ServiceStatus = "safe" | "detected" | "unavailable" | "info";
+
+export interface ThreatService {
+  name: string;
+  status: ServiceStatus;
+  detail: string;
+  checkedAt: string;
+}
+
+export type ThreatLevel = "low" | "medium" | "high" | "critical";
+
 export interface FeatureContribution {
   feature: string;
   contribution: number; // 0-100 relative importance
   direction: "risk" | "safe";
   explanation: string;
 }
+
 
 export interface ModelInfo {
   name: string;
