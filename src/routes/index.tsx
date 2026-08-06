@@ -234,6 +234,7 @@ function Index() {
           {tab === "scan" && (
             <ScanTab
               url={url} setUrl={setUrl} loading={loading} error={error} result={result} onSubmit={onSubmit}
+              onQrUrl={onQrUrl}
             />
           )}
           {tab === "history" && (
