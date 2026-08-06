@@ -414,11 +414,24 @@ function ResultView({ result }: { result: PA }) {
         </div>
       </div>
 
+      {/* AI security report */}
+      <DetectionSummary result={result} />
+
+      {/* AI explanation cards */}
+      <AiReasonCards result={result} />
+
+      {/* Website information */}
+      <WebsiteInfoPanel result={result} />
+
+      {/* Threat intelligence sources */}
+      <ThreatIntelligenceGrid result={result} />
+
       {/* Threat intel + metadata */}
       <div className="grid gap-5 md:grid-cols-2">
         <ThreatIntelPanel result={result} />
         <MetadataPanel result={result} />
       </div>
+
 
       {/* Red flags & green flags */}
       <div className="grid gap-5 md:grid-cols-2">
