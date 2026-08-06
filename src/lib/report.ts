@@ -43,6 +43,16 @@ export function exportCSV(a: PhishingAnalysis) {
   rows.push(["Expiration Date", a.metadata.expirationDate].map(esc).join(","));
   rows.push(["Domain Age (days)", a.metadata.domainAgeDays].map(esc).join(","));
   rows.push(["HTTPS", a.features.httpsStatus].map(esc).join(","));
+  rows.push(["Threat Level", a.threatLevel ?? ""].map(esc).join(","));
+  rows.push(["Scan Duration (ms)", a.scanDurationMs ?? ""].map(esc).join(","));
+  rows.push(["IP Address", a.dns?.ipAddress ?? ""].map(esc).join(","));
+  rows.push(["Hosting Country", a.dns?.hostingCountry ?? a.metadata.hostingCountry ?? ""].map(esc).join(","));
+  rows.push(["DNS Status", a.dns?.status ?? ""].map(esc).join(","));
+  if (a.threatServices?.length) {
+    rows.push([""].map(esc).join(","));
+    rows.push(["Intel Source", "Status", "Detail"].map(esc).join(","));
+    for (const s of a.threatServices) rows.push([s.name, s.status, s.detail].map(esc).join(","));
+  }
   rows.push([""].map(esc).join(","));
   rows.push(["Red Flag", "Explanation"].map(esc).join(","));
   for (const r of a.redFlags) rows.push([r.label, r.explanation].map(esc).join(","));
