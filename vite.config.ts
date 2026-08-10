@@ -16,4 +16,7 @@ export default defineConfig({
   vite: {
     plugins: [mcpPlugin()],
   },
+  nitro: {
+    preset: "node-server",
+  },
 });
