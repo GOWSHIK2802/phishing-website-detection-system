@@ -20,7 +20,6 @@ import { AiReasonCards } from "@/components/ai-reasons";
 import { WebsiteInfoPanel } from "@/components/website-info";
 import { ThreatIntelligenceGrid } from "@/components/threat-services";
 import { QrScanner } from "@/components/qr-scanner";
-import { SecurityChatbot } from "@/components/security-chatbot";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -249,7 +248,6 @@ function Index() {
           )}
           {tab === "analytics" && <AnalyticsTab history={history} />}
         </main>
-        <SecurityChatbot result={result} />
       </div>
     </div>
   );
