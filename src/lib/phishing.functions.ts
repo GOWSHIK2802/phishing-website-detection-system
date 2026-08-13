@@ -626,8 +626,6 @@ export const analyzeUrl = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => InputSchema.parse(data))
   .handler(async ({ data }): Promise<PhishingAnalysis> => {
     const startedAt = Date.now();
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
 
     let normalizedUrl: string;
     let parsedUrl: URL;
