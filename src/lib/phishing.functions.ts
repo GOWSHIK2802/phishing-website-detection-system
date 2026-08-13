@@ -733,7 +733,7 @@ export const analyzeUrl = createServerFn({ method: "POST" })
           .slice(0, 6)
           .map(([feature, gain]) => ({ feature: XGB_LABELS[feature] ?? feature, gain })),
       },
-      aiExplanation: parsed.aiExplanation ?? parsed.summary ?? "",
+      aiExplanation,
       analyzedAt: new Date().toISOString(),
       dns,
       threatServices: buildThreatServices(metadata, dns, threatIntel, features),
