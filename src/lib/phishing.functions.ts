@@ -657,97 +657,44 @@ export const analyzeUrl = createServerFn({ method: "POST" })
     const modelScore = Math.round(prediction.probability * 100);
     const topContribs = prediction.contributions.slice(0, 8);
 
-    const systemPrompt = `You are a cybersecurity analyst specializing in phishing detection. You analyze URLs from their string, structure, heuristic signals, WHOIS/RDAP metadata, and threat-intel feeds. You NEVER visit URLs. Be concise, factual, and cautious.`;
-
-    const userPrompt = `Analyze this URL for phishing risk.
-
-URL: ${normalizedUrl}
-Host: ${host}
-Registrable domain: ${registrable}
-Domain age (days): ${metadata.domainAgeDays ?? "unknown"}
-Registrar: ${metadata.registrar ?? "unknown"}
-Expires: ${metadata.expirationDate ?? "unknown"}
-HTTPS reachable: ${metadata.ssl.httpsReachable}
-Redirect chain: ${metadata.redirectChain.join(" -> ") || "none"}
-Threat intel (URLhaus): ${threatIntel.reported ? `REPORTED (${threatIntel.threat})` : "not reported"}
-
-Heuristic signals (${triggered.length}/${heuristics.length} triggered):
-${heuristics.map((h) => `- [${h.triggered ? "X" : " "}] (${h.weight}) ${h.label}: ${h.detail}`).join("\n")}
-
-XGBoost classifier output (gradient-boosted decision trees, ${XGB_METRICS.rounds} rounds, test accuracy ${(XGB_METRICS.accuracy * 100).toFixed(1)}%):
-- Phishing probability: ${(prediction.probability * 100).toFixed(1)}%
-- Raw log-odds margin: ${prediction.margin.toFixed(3)}
-- Top signed feature contributions (positive = pushes toward phishing):
-${topContribs.map((c) => `  - ${XGB_LABELS[c.feature] ?? c.feature} = ${c.value} -> ${c.contribution >= 0 ? "+" : ""}${c.contribution}`).join("\n")}
-
-Rule-based cross-check score: ${heuristicScore}/100
-
-The XGBoost probability is the authoritative risk score. Keep "score" within 10 points of ${modelScore} unless the threat feed says otherwise. Explain the model's reasoning in plain language.
-
-Return ONLY a JSON object with:
-- "score": integer 0-100 (final risk)
-- "confidence": integer 0-100 (how sure you are)
-- "verdict": "safe" | "suspicious" | "dangerous"
-- "summary": 1-2 sentence plain-English verdict
-- "redFlags": array of 2-6 objects {"label": string, "explanation": string} — plain-language reasons
-- "greenFlags": array of 0-4 strings
-- "recommendation": one sentence primary action
-- "aiExplanation": 2-4 sentences explaining WHY the model reached this verdict, referencing specific features
-
-No markdown, no code fences.`;
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": apiKey },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (response.status === 429) throw new Error("Rate limit reached. Please try again in a moment.");
-    if (response.status === 402) throw new Error("AI credits exhausted. Please add credits in Lovable Cloud.");
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`AI gateway error (${response.status}): ${text.slice(0, 200)}`);
-    }
-
-    const payload = await response.json();
-    const content: string = payload?.choices?.[0]?.message?.content ?? "{}";
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const match = content.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : {};
-    }
-
-    const aiScore = Number.isFinite(parsed.score) ? Math.max(0, Math.min(100, Math.round(parsed.score))) : modelScore;
-    // Blend: the XGBoost ensemble carries most of the weight, the LLM adjusts.
-    let score = Math.round(modelScore * 0.7 + aiScore * 0.3);
+    let score = modelScore;
     if (threatIntel.reported) score = Math.max(score, 90);
+    const verdict: PhishingVerdict = score >= 65 ? "dangerous" : score >= 30 ? "suspicious" : "safe";
+    const confidence = Math.max(0, Math.min(100, Math.round(prediction.confidence)));
 
-    const verdict: PhishingVerdict =
-      parsed.verdict ?? (score >= 65 ? "dangerous" : score >= 30 ? "suspicious" : "safe");
+    const redFlags = triggered
+      .filter((h) => h.weight !== "low")
+      .map((h) => ({ label: h.label, explanation: h.explanation }));
+    if (threatIntel.reported) {
+      redFlags.unshift({
+        label: "Listed on a public threat feed",
+        explanation: `This URL is reported on URLhaus${threatIntel.threat ? ` as ${threatIntel.threat}` : ""}.`,
+      });
+    }
 
-    const aiConfidence = Number.isFinite(parsed.confidence)
-      ? Math.max(0, Math.min(100, Math.round(parsed.confidence)))
-      : prediction.confidence;
-    const confidence = Math.max(0, Math.min(100, Math.round(prediction.confidence * 0.7 + aiConfidence * 0.3)));
+    const greenFlags: string[] = [];
+    if (features.httpsStatus) greenFlags.push("Uses HTTPS");
+    if ((metadata.domainAgeDays ?? 0) > 365) greenFlags.push("Domain has been registered for over a year");
+    if (!threatIntel.reported) greenFlags.push("Not present on the URLhaus threat feed");
+    if (triggered.length === 0) greenFlags.push("No suspicious URL structure signals triggered");
 
-    const redFlagsRaw = parsed.redFlags ?? [];
-    const redFlags = Array.isArray(redFlagsRaw)
-      ? redFlagsRaw.map((r: any) =>
-          typeof r === "string"
-            ? { label: r, explanation: "" }
-            : { label: String(r.label ?? ""), explanation: String(r.explanation ?? "") },
-        )
-      : [];
+    const summary =
+      verdict === "dangerous"
+        ? `High phishing risk (${score}/100). The model flagged ${triggered.length} suspicious signal(s) on ${host}.`
+        : verdict === "suspicious"
+          ? `Moderate risk (${score}/100). Some characteristics of ${host} resemble known phishing patterns.`
+          : `Low risk (${score}/100). No strong phishing indicators were found for ${host}.`;
+
+    const aiExplanation = `The XGBoost classifier (${XGB_METRICS.rounds} boosting rounds, ${(XGB_METRICS.accuracy * 100).toFixed(1)}% test accuracy) returned a phishing probability of ${(prediction.probability * 100).toFixed(1)}% (log-odds margin ${prediction.margin.toFixed(2)}). The strongest contributing features were ${topContribs
+      .slice(0, 3)
+      .map((c) => `${XGB_LABELS[c.feature] ?? c.feature} = ${c.value} (${c.contribution >= 0 ? "+" : ""}${c.contribution})`)
+      .join(", ")}. The rule-based cross-check scored ${heuristicScore}/100 and the URLhaus feed reported it as ${threatIntel.reported ? "malicious" : "clean"}.`;
+
+    const recommendation =
+      verdict === "safe"
+        ? "This URL looks fine, but always double-check before entering credentials."
+        : "Do not enter any personal information or credentials on this site.";
+
 
     const featureImportance = computeFeatureImportance(prediction);
     const recommendations = buildRecommendations(verdict, features, threatIntel);
