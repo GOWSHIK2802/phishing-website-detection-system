@@ -705,18 +705,11 @@ export const analyzeUrl = createServerFn({ method: "POST" })
       score,
       confidence,
       verdict,
-      summary: parsed.summary ?? "No summary available.",
-      redFlags: redFlags.length
-        ? redFlags
-        : triggered
-            .filter((h) => h.weight !== "low")
-            .map((h) => ({ label: h.label, explanation: h.explanation })),
-      greenFlags: parsed.greenFlags ?? [],
-      recommendation:
-        parsed.recommendation ??
-        (verdict === "safe"
-          ? "This URL looks fine, but always double-check before entering credentials."
-          : "Do not enter any personal information or credentials on this site."),
+      summary,
+      redFlags,
+      greenFlags,
+      recommendation,
+
       recommendations,
       heuristics,
       features,
